@@ -21,6 +21,7 @@ import (
 var (
 	db    *sql.DB
 	store *sessions.CookieStore
+	g_users map[int]User
 )
 
 type User struct {
@@ -81,7 +82,10 @@ var (
 )
 
 func authenticate(w http.ResponseWriter, r *http.Request, email, passwd string) {
-	query := `SELECT u.id AS id, u.account_name AS account_name, u.nick_name AS nick_name, u.email AS email
+	query := `SELECT u.id AS id,
+	u.account_name AS account_name,
+	u.nick_name AS nick_name,
+	u.email AS email
 FROM users u
 JOIN salts s ON u.id = s.user_id
 WHERE u.email = ? AND u.passhash = SHA2(CONCAT(?, s.salt), 512)`
@@ -130,7 +134,36 @@ func authenticated(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+
+func prepare(){
+	//USERの準備
+	{
+		/*
+		row := db.Query(`SELECT * FROM users`)
+		user := User{}
+		err := row.Scan(&user.ID, &user.AccountName, &user.NickName, &user.Email, new(string))
+		if err == sql.ErrNoRows {
+			checkErr(ErrContentNotFound)
+		}
+		checkErr(err)
+		*/
+		rows, err := db.Query(`SELECT * FROM users`)
+		if err != sql.ErrNoRows {
+			checkErr(err)
+		}
+		for rows.Next() {
+			user := User{}
+			checkErr(rows.Scan(&user.ID, &user.AccountName, &user.NickName, &user.Email))
+			g_users[user.Id] = user;
+		}
+		rows.Close()
+	}
+}
+
+//TODO
 func getUser(w http.ResponseWriter, userID int) *User {
+	return &g_users[userID]
+	/*
 	row := db.QueryRow(`SELECT * FROM users WHERE id = ?`, userID)
 	user := User{}
 	err := row.Scan(&user.ID, &user.AccountName, &user.NickName, &user.Email, new(string))
@@ -139,6 +172,7 @@ func getUser(w http.ResponseWriter, userID int) *User {
 	}
 	checkErr(err)
 	return &user
+	*/
 }
 
 func getUserFromAccount(w http.ResponseWriter, name string) *User {
@@ -754,6 +788,8 @@ func main() {
 
 	store = sessions.NewCookieStore([]byte(ssecret))
 
+	prepare();
+
 	r := mux.NewRouter()
 
 	l := r.Path("/login").Subrouter()
@@ -769,16 +805,14 @@ func main() {
 	d.HandleFunc("/entries/{account_name}", myHandler(ListEntries)).Methods("GET")
 	d.HandleFunc("/entry", myHandler(PostEntry)).Methods("POST")
 	d.HandleFunc("/entry/{entry_id}", myHandler(GetEntry)).Methods("GET")
-
 	d.HandleFunc("/comment/{entry_id}", myHandler(PostComment)).Methods("POST")
 
 	r.HandleFunc("/footprints", myHandler(GetFootprints)).Methods("GET")
-
 	r.HandleFunc("/friends", myHandler(GetFriends)).Methods("GET")
 	r.HandleFunc("/friends/{account_name}", myHandler(PostFriends)).Methods("POST")
-
 	r.HandleFunc("/initialize", myHandler(GetInitialize))
 	r.HandleFunc("/", myHandler(GetIndex))
+
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("../static")))
 	log.Fatal(http.ListenAndServe(":8080", r))
 }
